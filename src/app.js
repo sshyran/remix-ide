@@ -42,7 +42,7 @@ import { basicLogo } from './app/ui/svgLogo'
 import { RunTab, makeUdapp } from './app/udapp'
 
 import PanelsResize from './lib/panels-resize'
-import { Engine, WebsocketPlugin } from '@remixproject/engine'
+import { Engine } from '@remixproject/engine'
 import { RemixAppManager } from './remixAppManager'
 import { FramingService } from './framingService'
 import { MainView } from './app/panels/main-view'
@@ -135,32 +135,26 @@ class App {
     document.body.appendChild(self._view.splashScreen)
 
     // setup storage
-    var configStorage = new Storage('config-v0.8:')
+    const configStorage = new Storage('config-v0.8:')
 
     // load app config
     const config = new Config(configStorage)
     registry.put({api: config, name: 'config'})
 
     // load file system
+    self.appManager = new RemixAppManager({})
     self._components.filesProviders = {}
     self._components.filesProviders['browser'] = new FileProvider('browser')
     registry.put({api: self._components.filesProviders['browser'], name: 'fileproviders/browser'})
 
-    self._components.remixd = new WebsocketPlugin({
-      name: 'remixd-websocket',
-      methods: ['get'],
-      url: 'ws://127.0.0.1:65520'
-    })
-
-    console.log('remixd: ', self._components.remixd)
+    // var remixd = new Remixd(65520)
     // registry.put({api: remixd, name: 'remixd'})
     // remixd.event.register('system', (message) => {
     //   if (message.error) toolTip(message.error)
     // })
 
-    self._components.filesProviders['localhost'] = new RemixDProvider(self._components.remixd)
+    self._components.filesProviders['localhost'] = new RemixDProvider(self.appManager)
     registry.put({api: self._components.filesProviders['localhost'], name: 'fileproviders/localhost'})
-    console.log('self._components.filesProviders: ', self._components.filesProviders)
     registry.put({api: self._components.filesProviders, name: 'fileproviders'})
 
     migrateFileSystem(self._components.filesProviders['browser'])
@@ -242,10 +236,9 @@ Please make a backup of your contracts and start using http://remix.ethereum.org
   }
 
   // APP_MANAGER
-  const appManager = new RemixAppManager({})
+  const appManager = self.appManager
   const workspace = appManager.pluginLoader.get()
   const engine = new Engine(appManager)
-  
   await engine.onload()
 
   // SERVICES
@@ -306,7 +299,6 @@ Please make a backup of your contracts and start using http://remix.ethereum.org
   makeUdapp(blockchain, compilersArtefacts, (domEl) => terminal.logHtml(domEl))
 
   const contextualListener = new ContextualListener({editor})
-  const { remixd } = self._components
 
   engine.register([
     contentImport,
@@ -320,8 +312,7 @@ Please make a backup of your contracts and start using http://remix.ethereum.org
     contextualListener,
     terminal,
     web3Provider,
-    fetchAndCompile,
-    remixd
+    fetchAndCompile
   ])
 
   // LAYOUT & SYSTEM VIEWS
@@ -410,7 +401,13 @@ Please make a backup of your contracts and start using http://remix.ethereum.org
   await appManager.activatePlugin(['home', 'sidePanel', 'hiddenPanel', 'pluginManager', 'fileExplorers', 'settings', 'contextualListener', 'scriptRunner', 'terminal', 'fetchAndCompile'])
 
   // Set workspace after initial activation
-  if (Array.isArray(workspace)) await appManager.activatePlugin(workspace)
+  if (Array.isArray(workspace)) {
+    await appManager.activatePlugin(workspace)
+  } else {
+    // activate solidity plugin
+    appManager.ensureActivated('solidity')
+    appManager.ensureActivated('udapp')
+  }
 
   // Load and start the service who manager layout and frame
   const framingService = new FramingService(sidePanel, menuicons, mainview, this._components.resizeFeature)
@@ -422,7 +419,8 @@ Please make a backup of your contracts and start using http://remix.ethereum.org
   // get the file from gist
   const gistHandler = new GistHandler()
   const queryParams = new QueryParams()
-  const loadedFromGist = gistHandler.loadFromGist(queryParams.get(), fileManager)
+  const params = queryParams.get()
+  const loadedFromGist = gistHandler.loadFromGist(params, fileManager)
   if (!loadedFromGist) {
     // insert example contracts if there are no files to show
     self._components.filesProviders['browser'].resolveDirectory('/', (error, filesList) => {
@@ -438,4 +436,6 @@ Please make a backup of your contracts and start using http://remix.ethereum.org
   if (isElectron()) {
     appManager.activatePlugin('remixd')
   }
+
+  if (params.embed) framingService.embed()
 }
